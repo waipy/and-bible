@@ -75,17 +75,13 @@ abstract public class DocumentSelectionBase extends ListActivityBase implements 
 	//TODO just use displayedDocuments with a model giving 2 lines in list
 	private List<Book> displayedDocuments;
 
-	private boolean isDeletePossible;
-	// We only show installed ticks beside documents if in Document Downloads screen
-	private boolean isInstallStatusIconsShown;
-	
 	private DocumentControl documentControl = ControlFactory.getInstance().getDocumentControl();
-	
-	private static final int LIST_ITEM_TYPE = R.layout.list_item_2_image;
 
 	private ListActionModeHelper listActionModeHelper;
 
 	private final int actionModeMenuId;
+
+	private int layoutResource = R.layout.document_selection;
 
     private static final String TAG = "DocumentSelectionBase";
 
@@ -106,7 +102,7 @@ abstract public class DocumentSelectionBase extends ListActivityBase implements 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.document_selection);
+        setContentView(layoutResource);
 
        	initialiseView();
     }
@@ -122,12 +118,9 @@ abstract public class DocumentSelectionBase extends ListActivityBase implements 
 			}
 		});
 
-    	languageList = new ArrayList<Language>();
-    	displayedDocuments = new ArrayList<Book>();
+    	languageList = new ArrayList<>();
+    	displayedDocuments = new ArrayList<>();
     	
-    	ArrayAdapter<Book> listArrayAdapter = new DocumentItemAdapter(this, LIST_ITEM_TYPE, displayedDocuments, isInstallStatusIconsShown, this);
-    	setListAdapter(listArrayAdapter);
-
     	//prepare the documentType spinner
     	documentTypeSpinner = (Spinner)findViewById(R.id.documentTypeSpinner);
     	setInitialDocumentType();
@@ -161,23 +154,16 @@ abstract public class DocumentSelectionBase extends ListActivityBase implements 
 				public void onNothingSelected(AdapterView<?> arg0) {
 				}
 			});
-	    	langArrayAdapter = new ArrayAdapter<Language>(this, android.R.layout.simple_spinner_item, languageList);
+	    	langArrayAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, languageList);
 	    	langArrayAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
 	    	langSpinner.setAdapter(langArrayAdapter);
     	}
     }
 
-    @Override
-	protected void onRestart() {
-		super.onRestart();
-
-		// if downloading documents then ensure the correct ticks are checked after user presses More to return here
-		notifyDataSetChanged();
-	}
 
 	private void setDefaultLanguage() {
     	if (selectedLanguageNo==-1) {
-    		Language lang = null;
+    		Language lang;
     		// make selected language sticky
     		if (lastSelectedLanguage!=null && languageList.contains(lastSelectedLanguage)) {
     			lang = lastSelectedLanguage;
@@ -233,6 +219,9 @@ abstract public class DocumentSelectionBase extends ListActivityBase implements 
         			Log.d(TAG, "Selected "+selectedBook.getInitials());
         			handleDocumentSelection(selectedBook);
         		}
+
+				// prevent the item remaining highlighted.  Unfortunately the highlight is cleared before the selection is handled.
+				getListView().setItemChecked(position, false);
     		}
     	} catch (Exception e) {
     		Log.e(TAG, "document selection error", e);
@@ -266,7 +255,7 @@ abstract public class DocumentSelectionBase extends ListActivityBase implements 
 					Thread.currentThread().setContextClassLoader(getClass().getClassLoader());
 
 					allDocuments = getDocumentsFromSource(refresh);
-    	        	Log.i(TAG, "number of documents:"+allDocuments.size());
+    	        	Log.i(TAG, "Number of documents:"+allDocuments.size());
 				} catch (Exception e) {
 					Log.e(TAG, "Error getting documents", e);
 		    		Dialogs.getInstance().showErrorMsg(R.string.error_occurred, e);
@@ -334,7 +323,7 @@ abstract public class DocumentSelectionBase extends ListActivityBase implements 
     private void populateLanguageList() {
     	try {
     		// temporary Set to remove duplicate Languages
-    		Set<Language> langSet = new HashSet<Language>();
+    		Set<Language> langSet = new HashSet<>();
 
     		if (allDocuments!=null && allDocuments.size()>0) {
    	        	Log.d(TAG, "initialising language list");
@@ -484,8 +473,9 @@ abstract public class DocumentSelectionBase extends ListActivityBase implements 
 		}
 		
 		// add version
-		Version versionObj = new Version(document.getBookMetaData().getProperty("Version"));
-		if (versionObj!=null) {
+		final String version = document.getBookMetaData().getProperty("Version");
+		if (version!=null) {
+			Version versionObj = new Version(version);
 	        String versionMsg = BibleApplication.getApplication().getString(R.string.about_version, versionObj.toString());
 			about += "\n\n"+versionMsg;
 		}
@@ -525,14 +515,6 @@ abstract public class DocumentSelectionBase extends ListActivityBase implements 
 		return languageList.get(selectedLanguageNo);
 	}
 	
-	public void setDeletePossible(boolean isDeletePossible) {
-		this.isDeletePossible = isDeletePossible;
-	}
-
-	public void setInstallStatusIconsShown(boolean isInstallStatusIconsShown) {
-		this.isInstallStatusIconsShown = isInstallStatusIconsShown;
-	}
-
 	public Spinner getDocumentTypeSpinner() {
 		return documentTypeSpinner;
 	}
@@ -562,5 +544,9 @@ abstract public class DocumentSelectionBase extends ListActivityBase implements 
 			case MAPS:				selectedDocumentFilterNo = 4;  		break;
 			default:				selectedDocumentFilterNo = 0;  		break;
     	}
+	}
+
+	public void setLayoutResource(int layoutResource) {
+		this.layoutResource = layoutResource;
 	}
 }

@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
       package="net.bible.android.activity"
       android:installLocation="auto"
-      android:versionName="2.7.1" android:versionCode="211">
+      android:versionName="2.8.1" android:versionCode="216">
     <uses-sdk android:minSdkVersion="9" android:targetSdkVersion="19"/>
     
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
@@ -132,13 +132,13 @@
                   android:label="@string/speak"
                   android:configChanges="keyboardHidden|orientation|screenSize|locale">
         </activity>
+		<activity android:name="net.bible.android.view.activity.download.FirstDownload"
+				  android:label="@string/download"
+				  android:configChanges="keyboardHidden|orientation|screenSize|locale">
+		</activity>
         <activity android:name="net.bible.android.view.activity.download.Download"
                   android:label="@string/download"
                   android:configChanges="keyboardHidden|orientation|screenSize|locale">
-        </activity>
-        <activity android:name="net.bible.android.view.activity.download.EnsureBibleDownloaded"
-                  android:configChanges="keyboardHidden|orientation|screenSize|locale"
-                  android:label="@string/download">
         </activity>
         <activity android:name="net.bible.android.view.activity.download.DownloadStatus"
                   android:configChanges="keyboardHidden|orientation|screenSize|locale"

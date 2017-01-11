@@ -1,16 +1,13 @@
 package net.bible.android.control.download;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
+import android.util.Log;
 
 import net.bible.android.SharedConstants;
 import net.bible.android.activity.R;
 import net.bible.android.view.activity.base.Dialogs;
 import net.bible.service.common.CommonUtils;
 import net.bible.service.download.DownloadManager;
+import net.bible.service.download.RepoBase;
 import net.bible.service.download.RepoFactory;
 import net.bible.service.download.XiphosRepo;
 import net.bible.service.font.FontControl;
@@ -25,7 +22,17 @@ import org.crosswire.jsword.book.BookMetaData;
 import org.crosswire.jsword.book.Books;
 import org.crosswire.jsword.book.sword.SwordBookMetaData;
 
-import android.util.Log;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+
+import static net.bible.android.control.download.DocumentStatus.DocumentInstallStatus.BEING_INSTALLED;
+import static net.bible.android.control.download.DocumentStatus.DocumentInstallStatus.ERROR_DOWNLOADING;
+import static net.bible.android.control.download.DocumentStatus.DocumentInstallStatus.INSTALLED;
+import static net.bible.android.control.download.DocumentStatus.DocumentInstallStatus.NOT_INSTALLED;
+import static net.bible.android.control.download.DocumentStatus.DocumentInstallStatus.UPGRADE_AVAILABLE;
 
 /** Support the download screen
  * 
@@ -35,17 +42,23 @@ import android.util.Log;
  */
 public class DownloadControl {
 
-	public enum BookInstallStatus {INSTALLED, NOT_INSTALLED, BEING_INSTALLED, UPGRADE_AVAILABLE};
+	private DocumentDownloadProgressCache documentDownloadProgressCache;
 
-	private XiphosRepo xiphosRepo;
+	private final DownloadQueue downloadQueue;
+
+	private final XiphosRepo xiphosRepo;
 	
-	private FontControl fontControl;
+	private final FontControl fontControl;
 
 	private static final String TAG = "DownloadControl";
 	
-	public DownloadControl() {
-		this.xiphosRepo = RepoFactory.getInstance().getXiphosRepo();
-		this.fontControl = FontControl.getInstance();
+	public DownloadControl(DownloadQueue downloadQueue, XiphosRepo xiphosRepo, FontControl fontControl) {
+		this.downloadQueue = downloadQueue;
+		this.xiphosRepo = xiphosRepo;
+		this.fontControl = fontControl;
+
+		// Listen for Progress changes and update the ui
+		documentDownloadProgressCache = new DocumentDownloadProgressCache();
 	}
 	
 	/** pre-download document checks
@@ -64,12 +77,10 @@ public class DownloadControl {
 		return okay;
 	}
 	
-	/** return a list of all available docs that have not already been downloaded, have no lang, or don't work
-	 * 
-	 * @return
+	/** @return a list of all available docs that have not already been downloaded, have no lang, or don't work
 	 */
 	public List<Book> getDownloadableDocuments(boolean refresh) {
-		List<Book> availableDocs = null;
+		List<Book> availableDocs;
 		try {
 			availableDocs = SwordDocumentFacade.getInstance().getDownloadableDocuments(refresh);
 			
@@ -105,7 +116,7 @@ public class DownloadControl {
        		
 		} catch (Exception e) {
 			Log.e(TAG, "Error downloading document list", e);
-			availableDocs = new ArrayList<Book>();
+			availableDocs = new ArrayList<>();
 		}
 		return availableDocs;
 	}
@@ -134,43 +145,62 @@ public class DownloadControl {
     		((SwordBookMetaData)bmd).reload();
     		bmd.setProperty(DownloadManager.REPOSITORY_KEY, repoKey);
     	}
-    	
-    	if (xiphosRepo.needsPostDownloadAction(document)) {
-    		xiphosRepo.addHandler(document);
-    	}
-    	
-		// the download happens in another thread
-		SwordDocumentFacade.getInstance().downloadDocument(document);
 
-		// if a font is required then download that too
-		String font = fontControl.getFontForBook(document);
-    	if (!StringUtils.isEmpty(font) && !fontControl.exists(font)) {
-    		// the download happens in another thread
-    		fontControl.downloadFont(font);
-    	}
+		if (!downloadQueue.isInQueue(document)) {
+
+			if (xiphosRepo.needsPostDownloadAction(document)) {
+				xiphosRepo.addHandler(document);
+			}
+
+			// the download happens in another thread
+			RepoBase repo = RepoFactory.getInstance().getRepoForBook(document);
+			downloadQueue.addDocumentToDownloadQueue(document, repo);
+
+			// if a font is required then download that too
+			String font = fontControl.getFontForBook(document);
+			if (!StringUtils.isEmpty(font) && !fontControl.exists(font)) {
+				// the download happens in another thread
+				fontControl.downloadFont(font);
+			}
+		}
 	}
 
 	/** return install status - installed, not inst, or upgrade **/
-	public BookInstallStatus getBookInstallStatus(Book book) {
-		Book installedBook = SwordDocumentFacade.getInstance().getDocumentByInitials(book.getInitials());
+	public DocumentStatus getDocumentStatus(Book document) {
+		String initials = document.getInitials();
+		if (downloadQueue.isInQueue(document)) {
+			return new DocumentStatus(initials, BEING_INSTALLED, documentDownloadProgressCache.getPercentDone(document));
+		}
+		if (downloadQueue.isErrorDownloading(document)) {
+			return new DocumentStatus(initials, ERROR_DOWNLOADING, 0);
+		}
+
+		Book installedBook = SwordDocumentFacade.getInstance().getDocumentByInitials(document.getInitials());
 		if (installedBook!=null) {
-			// see if the new book is a later version
+			// see if the new document is a later version
 			try {
-	    		Version newVersionObj = new Version(book.getBookMetaData().getProperty("Version"));
+	    		Version newVersionObj = new Version(document.getBookMetaData().getProperty("Version"));
 	    		Version installedVersionObj = new Version(installedBook.getBookMetaData().getProperty("Version"));
-	    		if (newVersionObj!=null && installedVersionObj!=null && 
-	    			newVersionObj.compareTo(installedVersionObj)>0) {
-	    			return BookInstallStatus.UPGRADE_AVAILABLE;
+	    		if (newVersionObj.compareTo(installedVersionObj)>0) {
+	    			return new DocumentStatus(initials, UPGRADE_AVAILABLE, 100);
 	    		}
 			} catch (Exception e) {
 				Log.e(TAG,  "Error comparing versions", e);
 				// probably not the same version if an error occurred comparing
-    			return BookInstallStatus.UPGRADE_AVAILABLE;
+				return new DocumentStatus(initials, UPGRADE_AVAILABLE, 100);
 			}
-			// otherwise same book is already installed
-			return BookInstallStatus.INSTALLED;
+			// otherwise same document is already installed
+			return new DocumentStatus(initials, INSTALLED, 100);
 		} else {
-			return BookInstallStatus.NOT_INSTALLED;
+			return new DocumentStatus(initials, NOT_INSTALLED, 0);
 		}
+	}
+
+	public void startMonitoringDownloads() {
+		documentDownloadProgressCache.startMonitoringDownloads();
+	}
+
+	public void stopMonitoringDownloads() {
+		documentDownloadProgressCache.stopMonitoringDownloads();
 	}
 }

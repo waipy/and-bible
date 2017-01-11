@@ -13,7 +13,6 @@ import android.widget.Toast;
 import net.bible.android.activity.R;
 import net.bible.android.control.ControlFactory;
 import net.bible.android.control.download.DownloadControl;
-import net.bible.android.view.activity.base.Callback;
 import net.bible.android.view.activity.base.Dialogs;
 import net.bible.android.view.activity.base.DocumentSelectionBase;
 import net.bible.service.common.CommonUtils;
@@ -39,18 +38,20 @@ import java.util.List;
  */
 public class Download extends DocumentSelectionBase {
 
-	private static final String TAG = "Download";
+	private DocumentDownloadItemAdapter documentDownloadItemAdapter;
 
-	private boolean forceBasicFlow;
-	
+	private static final int LIST_ITEM_TYPE = R.layout.document_download_list_item;
+
 	private DownloadControl downloadControl;
 
 	private static final String REPO_REFRESH_DATE = "repoRefreshDate";
 	private static final long REPO_LIST_STALE_AFTER_DAYS = 10;
 	private static final long MILLISECS_IN_DAY = 1000*60*60*24;
 	
-	public static final int DOWNLOAD_MORE_RESULT = 10;
 	public static final int DOWNLOAD_FINISH = 1;
+	private boolean downloadConfirmationShown = false;
+
+	private static final String TAG = "Download";
 
 	public Download() {
 		super(NO_OPTIONS_MENU, R.menu.download_documents_context_menu);
@@ -59,19 +60,19 @@ public class Download extends DocumentSelectionBase {
 	/** Called when the activity is first created. */
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        forceBasicFlow = SwordDocumentFacade.getInstance().getBibles().size()==0;
-    	setInstallStatusIconsShown(!forceBasicFlow);
-        setDeletePossible(!forceBasicFlow);
-    	
         super.onCreate(savedInstanceState);
 
-        downloadControl = ControlFactory.getInstance().getDownloadControl();
+		documentDownloadItemAdapter = new DocumentDownloadItemAdapter(this, LIST_ITEM_TYPE, getDisplayedDocuments(), this);
+		setListAdapter(documentDownloadItemAdapter);
+
+		downloadControl = ControlFactory.getInstance().getDownloadControl();
         
     	// in the basic flow we force the user to download a bible
-    	getDocumentTypeSpinner().setEnabled(!forceBasicFlow);
-       	
+    	getDocumentTypeSpinner().setEnabled(true);
+
+		boolean firstTime = SwordDocumentFacade.getInstance().getBibles().size()==0;
        	// if first time
-       	if (forceBasicFlow) {
+       	if (firstTime) {
         	// prepare the document list view - done in another thread
         	populateMasterDocumentList(false);
         	updateLastRepoRefreshDate();
@@ -114,7 +115,23 @@ public class Download extends DocumentSelectionBase {
     protected List<Book> getDocumentsFromSource(boolean refresh) {
     	return downloadControl.getDownloadableDocuments(refresh);
     }
-    
+
+
+
+	@Override
+	protected void onStart() {
+		super.onStart();
+
+		downloadControl.startMonitoringDownloads();
+	}
+
+	@Override
+	protected void onStop() {
+		super.onStop();
+
+		downloadControl.stopMonitoringDownloads();
+	}
+
     /** 
      * Get normally sorted list of languages for the language selection spinner 
      */
@@ -131,11 +148,7 @@ public class Download extends DocumentSelectionBase {
     protected void handleDocumentSelection(Book document) {
     	Log.d(TAG, "Document selected:"+document.getInitials());
     	try {
-    		if (JobManager.getJobCount()>=2) {
-    			showTooManyJobsDialog();
-    		} else {
-    			manageDownload(document);
-    		}
+   			manageDownload(document);
     	} catch (Exception e) {
     		Log.e(TAG, "Error on attempt to download", e);
     		Toast.makeText(this, R.string.error_downloading, Toast.LENGTH_SHORT).show();
@@ -144,33 +157,28 @@ public class Download extends DocumentSelectionBase {
 
 	private void showTooManyJobsDialog() {
 		Log.i(TAG, "Too many jobs:"+JobManager.getJobCount());
-		Dialogs.getInstance().showErrorMsg(R.string.too_many_jobs, new Callback() {
-			@Override
-			public void okay() {
-				showDownloadStatus();
-			}
-		});
-	}
-
-	public void showDownloadStatus() {
-		Intent intent = new Intent(this, DownloadStatus.class);
-		startActivityForResult(intent, 1);
+		Dialogs.getInstance().showErrorMsg(R.string.too_many_jobs);
 	}
 
     protected void manageDownload(final Book documentToDownload) {
     	if (documentToDownload!=null) {
-        	new AlertDialog.Builder(this)
-    		   .setMessage(getText(R.string.download_document_confirm_prefix)+" "+documentToDownload.getName())
-    	       .setCancelable(false)
-    	       .setPositiveButton(R.string.okay, new DialogInterface.OnClickListener() {
-    	           public void onClick(DialogInterface dialog, int id) {
-    	        	   doDownload(documentToDownload);
-    	           }
-    	       })
-    	       .setNegativeButton(R.string.cancel, new DialogInterface.OnClickListener() {
-    	           public void onClick(DialogInterface dialog, int id) {
-    	           }
-    	       }).create().show();
+			if (downloadConfirmationShown) {
+				doDownload(documentToDownload);
+			} else {
+				new AlertDialog.Builder(this)
+						.setMessage(getText(R.string.download_document_confirm_prefix) + " " + documentToDownload.getName())
+						.setCancelable(false)
+						.setPositiveButton(R.string.okay, new DialogInterface.OnClickListener() {
+							public void onClick(DialogInterface dialog, int id) {
+								downloadConfirmationShown = true;
+								doDownload(documentToDownload);
+							}
+						})
+						.setNegativeButton(R.string.cancel, new DialogInterface.OnClickListener() {
+							public void onClick(DialogInterface dialog, int id) {
+							}
+						}).create().show();
+			}
     	}
     }
 
@@ -178,16 +186,9 @@ public class Download extends DocumentSelectionBase {
     	try {
 			// the download happens in another thread
 			downloadControl.downloadDocument(document);
-	    	
-	    	Intent intent;
-	    	if (forceBasicFlow) {
-	    		intent = new Intent(this, EnsureBibleDownloaded.class);
-	    		// finish this so when EnsureDalogDownload finishes we go straight back to StartupActivity which will start MainBibleActivity
-	    		finish();
-	    	} else {
-	    		intent = new Intent(this, DownloadStatus.class);
-	    	}
-        	startActivityForResult(intent, 1);
+
+			// update screen so the icon to the left of the book changes
+			notifyDataSetChanged();
 
     	} catch (Exception e) {
     		Log.e(TAG, "Error on attempt to download", e);
